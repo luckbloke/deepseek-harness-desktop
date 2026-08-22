@@ -1,0 +1,36 @@
+directories:
+  output: release
+  buildResources: build
+appId: ai.deepseek.dsh
+productName: DeepSeek Harness
+files:
+  - filter:
+      - lib/**/*
+      - resources/**/*
+extraResources:
+  - from: ../cli/lib
+    to: cli/lib
+  - from: ../cli/config
+    to: cli/config
+  - from: ../web/dist
+    to: web/dist
+  - from: ./assets
+    to: assets
+win:
+  target:
+    - nsis
+  icon: resources/icon.ico
+mac:
+  target:
+    - dmg
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+linux:
+  target:
+    - AppImage
+  icon: resources/icon.png
+  category: Development
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+electronVersion: 43.4.1

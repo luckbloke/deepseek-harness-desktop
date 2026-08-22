@@ -1,0 +1,81 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "description": "DeepSeek Harness desktop application: Electron shell over the web profile, with system tray, native menus, and desktop notifications",
+  "version": "0.1.1-rc.2",
+  "author": {
+    "name": "DeepSeek AI",
+    "email": "support@deepseek.com"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "apps/desktop"
+  },
+  "type": "module",
+  "main": "lib/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc",
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^43.4.1",
+    "electron-builder": "^25.0.0",
+    "typescript": "^6.0.3"
+  },
+  "build": {
+    "appId": "ai.deepseek.dsh",
+    "productName": "DeepSeek Harness",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "lib/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/dsh",
+         "to": "dsh"
+      },
+      {
+        "from": "./assets",
+        "to": "assets"
+      }
+    ],
+    "win": {
+      "target": ["nsis","portable"],
+      "icon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "DeepSeek-Harness-${version}-portable.exe"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "assets/icon.png",
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
