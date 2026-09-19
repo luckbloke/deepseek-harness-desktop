@@ -8,10 +8,11 @@
  * @module @deepseek-ai/dsh-desktop/main
  */
 
-import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, ipcMain, Notification } from 'electron'
+import { app, BrowserWindow, Menu, Tray, dialog, shell, ipcMain, Notification, nativeImage } from 'electron'
+import type { NativeImage } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createConnection } from 'node:net'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 
@@ -40,11 +41,11 @@ function resolveDshBin(): string {
   if (existsSync(devPath)) return devPath
 
   // 回退：项目内的 vendor 目录
-  const vendorPath = join(__dirname, '..', 'vendor', 'dsh', 'apps', 'cli', 'lib', 'bin.js')
+  const vendorPath = join(__dirname, '..', 'vendor', 'deepseek-harness', 'apps', 'cli', 'lib', 'bin.js')
   if (existsSync(vendorPath)) return vendorPath
 
   // 打包后的资源
-  const packagedCli = join(process.resourcesPath ?? '', 'cli', 'lib', 'bin.js')
+  const packagedCli = join(process.resourcesPath ?? '','vendor', 'deepseek-harness','apps', 'cli', 'lib', 'bin.js')
   return packagedCli
 }
 
@@ -69,10 +70,10 @@ function resolveWebDist(): string {
   const devPath = resolve(__dirname, '..', '..', 'deepseek-harness', 'apps', 'web', 'dist')
   if (existsSync(devPath)) return devPath
 
-  const vendorPath = join(__dirname, '..', 'vendor', 'dsh', 'apps', 'web', 'dist')
+  const vendorPath = join(__dirname, '..', 'vendor', 'deepseek-harness', 'apps', 'web', 'dist')
   if (existsSync(vendorPath)) return vendorPath
 
-  return join(process.resourcesPath ?? '', 'web', 'dist')
+  return join(process.resourcesPath ?? '','vendor', 'deepseek-harness','apps','web', 'dist')
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -80,6 +81,7 @@ let tray: Tray | null = null
 let dshProcess: ChildProcess | null = null
 let serverUrl: string | null = null
 let isQuitting = false
+let titleInterval: NodeJS.Timeout | null = null
 
 /**
  * Spawn the dsh web profile and resolve the listen URL from its stdout.
@@ -108,8 +110,8 @@ function startDshWeb(args: string[] = []): Promise<string> {
     }
 
     const projectRoot = app.isPackaged
-      ? (process.resourcesPath ?? process.cwd())
-      : resolve(__dirname, '..', '..', '..')
+      ? join(process.resourcesPath ?? '','vendor', 'deepseek-harness')
+      : resolve(__dirname, '..')
     console.log('[dsh-desktop] projectRoot:', projectRoot)
 
     // 解析 host 和 port
@@ -139,13 +141,36 @@ function startDshWeb(args: string[] = []): Promise<string> {
     })
 
     function spawnService() {
+      // 构建 NODE_PATH 数组，按优先级排序
+      const nodePaths = [
+        // 1) 顶层 node_modules（存放提升后的所有外部依赖，如 js-yaml）
+        app.isPackaged
+          ? join(projectRoot, 'node_modules')
+          : join(projectRoot, 'node_modules'),
+        // 2) apps/cli/node_modules（如果单独存放，也包含）
+        app.isPackaged
+          ? join(projectRoot, 'apps', 'cli', 'node_modules')
+          : join(projectRoot, 'apps', 'cli', 'node_modules'),
+        // 3) packages 目录（内部包源码，用于 @deepseek-ai/* 解析）
+        app.isPackaged
+          ? join(projectRoot, 'packages')
+          : join(projectRoot, 'packages'),
+        // 4) apps/cli 自身（某些内部导入可能需要）
+        app.isPackaged
+          ? join(projectRoot, 'apps', 'cli')
+          : join(projectRoot, 'apps', 'cli'),
+      ].filter(Boolean); // 过滤掉空值
+          
       const env = {
         ...process.env,
-        DSH_HOME: process.env.DSH_HOME || join(projectRoot, 'profiles'),
-      }
-
-      // 使用系统 node 命令，避免 Electron 运行时环境干扰
-      const cmd = 'node'
+        DSH_HOME: process.env.DSH_HOME || (app.isPackaged
+          ? join(process.env.HOME || process.env.USERPROFILE || '', '.dsh')
+          : join(projectRoot, 'profiles')
+        ),
+        NODE_PATH: nodePaths.join(delimiter),  // 直接用 delimiter
+      };
+      
+      const cmd = getNodePath();
       const cmdArgs = [bin, 'web', '--no-open', '--host', host, ...args]
       console.log('[dsh-desktop] Spawning:', cmd, cmdArgs)
 
@@ -188,6 +213,23 @@ function startDshWeb(args: string[] = []): Promise<string> {
       })
     }
   })
+}
+
+/**
+ * 获取用于启动子进程的 Node 可执行文件路径
+ * - 开发模式：返回 'node'（系统 Node）
+ * - 打包模式：优先使用 resources/node.exe，若不存在则回退到 process.execPath
+ */
+function getNodePath(): string {
+  if (!app.isPackaged) {
+    return 'node';
+  }
+  const bundledNode = join(process.resourcesPath, 'node.exe');
+  if (existsSync(bundledNode)) {
+    return bundledNode;
+  }
+  console.warn('[dsh-desktop] 未找到 resources/node.exe，使用 process.execPath 作为回退');
+  return process.execPath;
 }
 
 /**
@@ -257,9 +299,44 @@ function createMainWindow(url: string): void {
   void mainWindow.loadURL(url)
 
   // 锁定窗口标题，防止被 Web 页面覆盖
+  // 方法1: 页面加载完成后设置
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow?.setTitle('DeepSeek Harness')
+    // 通过执行 JS 防止页面修改标题
+    mainWindow?.webContents.executeJavaScript(`
+      // 覆盖 document.title 的 setter
+      Object.defineProperty(document, 'title', {
+        get: function() { return 'DeepSeek Harness'; },
+        set: function(value) { /* 忽略设置 */ }
+      });
+      // 立即设置
+      document.title = 'DeepSeek Harness';
+    `).catch(() => { /* 忽略错误 */ })
   })
+
+  // 方法2: 阻止页面标题更新事件
+  mainWindow.webContents.on('page-title-updated', (event) => {
+    event.preventDefault()
+    mainWindow?.setTitle('DeepSeek Harness')
+  })
+
+  // 方法3: 定期检查并修正标题（每 500ms）
+  if (titleInterval) {
+    clearInterval(titleInterval)
+  }
+  titleInterval = setInterval(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const currentTitle = mainWindow.getTitle()
+      if (currentTitle !== 'DeepSeek Harness') {
+        mainWindow.setTitle('DeepSeek Harness')
+      }
+    } else {
+      if (titleInterval) {
+        clearInterval(titleInterval)
+        titleInterval = null
+      }
+    }
+  }, 500)
 
   mainWindow.on('close', (event) => {
     // On macOS, closing the window hides to tray instead of quitting.
@@ -270,120 +347,48 @@ function createMainWindow(url: string): void {
   })
 
   mainWindow.on('closed', () => {
+    if (titleInterval) {
+      clearInterval(titleInterval)
+      titleInterval = null
+    }
     mainWindow = null
   })
 }
 
-/**
- * Build the application menu bar (fully Chinese, simplified).
- * All role properties are marked as const to satisfy TypeScript.
- */
-function buildAppMenu(): void {
-  const isMac = process.platform === 'darwin'
-  const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac ? [{
-      label: 'DeepSeek Harness',
-      submenu: [
-        { role: 'about' as const, label: '关于 DeepSeek Harness' },
-        { type: 'separator' as const },
-        { role: 'services' as const, label: '服务' },
-        { type: 'separator' as const },
-        { role: 'hide' as const, label: '隐藏 DeepSeek Harness' },
-        { role: 'hideOthers' as const, label: '隐藏其他' },
-        { role: 'unhide' as const, label: '显示全部' },
-        { type: 'separator' as const },
-        { role: 'quit' as const, label: '退出 DeepSeek Harness' },
-      ],
-    }] : []),
-    {
-      label: '文件',
-      submenu: [
-        {
-          label: '新建会话',
-          accelerator: 'CmdOrCtrl+N',
-          click: () => {
-            mainWindow?.webContents.send('dsh:new-session')
-          },
-        },
-        { type: 'separator' as const },
-        isMac ? { role: 'close' as const, label: '关闭窗口' } : { role: 'quit' as const, label: '退出' },
-      ],
-    },
-    {
-      label: '编辑',
-      submenu: [
-        { role: 'undo' as const, label: '撤销' },
-        { role: 'redo' as const, label: '重做' },
-        { type: 'separator' as const },
-        { role: 'cut' as const, label: '剪切' },
-        { role: 'copy' as const, label: '复制' },
-        { role: 'paste' as const, label: '粘贴' },
-        { role: 'selectAll' as const, label: '全选' },
-      ],
-    },
-    {
-      label: '查看',
-      submenu: [
-        { role: 'reload' as const, label: '重新加载' },
-        { role: 'forceReload' as const, label: '强制重新加载' },
-        { role: 'toggleDevTools' as const, label: '切换开发者工具' },
-        { type: 'separator' as const },
-        { role: 'resetZoom' as const, label: '重置缩放' },
-        { role: 'zoomIn' as const, label: '放大' },
-        { role: 'zoomOut' as const, label: '缩小' },
-        { type: 'separator' as const },
-        { role: 'togglefullscreen' as const, label: '全屏切换' },
-      ],
-    },
-    {
-      label: '窗口',
-      submenu: [
-        { role: 'minimize' as const, label: '最小化' },
-        ...(isMac ? [
-          { role: 'zoom' as const, label: '缩放' },
-          { type: 'separator' as const },
-          { role: 'front' as const, label: '前置所有窗口' },
-          { type: 'separator' as const },
-          { role: 'window' as const, label: '窗口' },
-        ] : [
-          { role: 'close' as const, label: '关闭' },
-        ]),
-      ],
-    },
-    {
-      label: '帮助',
-      submenu: [
-        {
-          label: '文档',
-          click: () => {
-            void shell.openExternal('https://github.com/deepseek-ai/deepseek-harness')
-          },
-        },
-        {
-          label: '报告问题',
-          click: () => {
-            void shell.openExternal('https://github.com/deepseek-ai/deepseek-harness/issues')
-          },
-        },
-      ],
-    },
-  ]
-
-  const menu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(menu)
-}
-
 /** Build the system tray icon and context menu. */
 function buildTray(): void {
-  // 16x16 template icon — works on both macOS menu bar and Windows tray.
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA' +
-    'WElEQVQ4T2NkoBAwUqifYdQAhtEgYBgNhNFAGM0DjNA8gM1dDKP5Aj1fjIYBw2gQMOAMAtF8MZovRvPFaL4YzReg' +
-    'fDEaCKN5gHQvMJCuZTQIRvMBAJ6kExnRf7aqAAAAAElFTkSuQmCC',
-  )
+  // 使用实际的图标文件
+  const iconPath = getIconPath()
+  let icon: NativeImage
+  
+  // 尝试加载图标文件
+  if (existsSync(iconPath)) {
+    icon = nativeImage.createFromPath(iconPath)
+    // 如果是 .ico 文件，可能需要调整大小
+    if (iconPath.endsWith('.ico')) {
+      icon = icon.resize({ width: 16, height: 16 })
+    }
+  } else {
+    // 回退到 Base64 图标
+    icon = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA' +
+      'WElEQVQ4T2NkoBAwUqifYdQAhtEgYBgNhNFAGM0DjNA8gM1dDKP5Aj1fjIYBw2gQMOAMAtF8MZovRvPFaL4YzReg' +
+      'fDEaCKN5gHQvMJCuZTQIRvMBAJ6kExnRf7aqAAAAAElFTkSuQmCC',
+    )
+  }
+  
+  // 确保图标是模板图像（macOS 上适配明暗主题）
+  if (icon.isTemplateImage !== undefined) {
+    icon.setTemplateImage(true)
+  }
 
   tray = new Tray(icon)
   tray.setToolTip('DeepSeek Harness')
+
+  // Windows 上可能需要设置标题
+  if (process.platform === 'win32') {
+    tray.setTitle('DeepSeek Harness')
+  }
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -490,14 +495,13 @@ if (!gotTheLock) {
   app.whenReady().then(async () => {
     // 确保 DSH_HOME 已设置
     if (!process.env.DSH_HOME) {
-      const projectRoot = app.isPackaged
-        ? (process.resourcesPath ?? process.cwd())
-        : resolve(__dirname, '..', '..', '..')
-      process.env.DSH_HOME = join(projectRoot, 'profiles')
+      const homeDir = process.env.HOME || process.env.USERPROFILE || ''
+      process.env.DSH_HOME = join(homeDir, '.dsh')
       console.log('[dsh-desktop] Set DSH_HOME to', process.env.DSH_HOME)
     }
 
-    buildAppMenu()
+    // 移除所有菜单
+    Menu.setApplicationMenu(null)
 
     try {
       const url = await startDshWeb()
@@ -530,11 +534,19 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
+    if (titleInterval) {
+      clearInterval(titleInterval)
+      titleInterval = null
+    }
     stopDshWeb()
   })
 
   // Belt-and-suspenders: ensure the child dies even if before-quit races.
   process.on('exit', () => {
+    if (titleInterval) {
+      clearInterval(titleInterval)
+      titleInterval = null
+    }
     stopDshWeb()
   })
 }
