@@ -11,20 +11,23 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
-    "directory": "apps/desktop"
+    "url": "git+https://github.com/luckbloke/deepseek-harness-desktop.git"
   },
   "type": "module",
   "main": "lib/main.js",
   "scripts": {
-    "dev": "electron .",
     "build": "tsc",
-    "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dev": "electron .",
+    "start": "node scripts/run-electron.cjs",
+    "setup": "node scripts/setup-harness.cjs",
+    "setup:harness": "node scripts/setup-harness.cjs",
+    "sync:harness": "node scripts/sync-upstream.cjs",
+    "deploy": "node scripts/align-deploy.cjs",
+    "pack": "node scripts/run-electron-builder.cjs --dir --publish never",
+    "dist:win": "node scripts/run-electron-builder.cjs --win --publish never",
+    "dist:mac": "node scripts/run-electron-builder.cjs --mac --publish never",
+    "dist:linux": "node scripts/run-electron-builder.cjs --linux --publish never",
+    "dist": "node scripts/run-electron-builder.cjs --win --publish never"
   },
   "license": "MIT",
   "dependencies": {
@@ -34,6 +37,8 @@
     "@types/node": "^22.0.0",
     "electron": "^43.4.1",
     "electron-builder": "^25.0.0",
+    "pnpm": "^11.22.0",
+    "tar": "^7.5.22",
     "typescript": "^6.0.3"
   },
   "build": {
@@ -44,32 +49,40 @@
     },
     "files": [
       "lib/**/*",
-      "resources/**/*"
+      "preload.js"
     ],
     "extraResources": [
       {
-        "from": "vendor/dsh",
-         "to": "dsh"
-      },
-      {
-        "from": "./assets",
+        "from": "assets",
         "to": "assets"
       }
     ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "afterPack": "scripts/after-pack.cjs",
     "win": {
-      "target": ["nsis","portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "portable": {
       "artifactName": "DeepSeek-Harness-${version}-portable.exe"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "assets/icon.png",
       "category": "Development"
     },

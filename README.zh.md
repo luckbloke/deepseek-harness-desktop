@@ -3,44 +3,19 @@
 DeepSeek Harness 桌面应用。将 Web 版包装在 Electron 窗口中，提供系统托盘、
 原生菜单、桌面通知和单实例锁定等桌面特性。
 
-## 准备
-```sh
-# 初始化 Git 仓库
-git init
-git add .
-git commit -m "初始桌面端项目"
-# 添加官方仓库为子模块
-git submodule add https://github.com/deepseek-ai/deepseek-harness.git vendor/dsh
-
 ## 开发
-cd vendor/dsh
-pnpm install                     # 安装官方依赖
-pnpm run build                # 构建所有（包括 CLI 和 Web）
-cd ../..
-
-# 设置环境变量
-$env:DSH_VENDOR_PATH = "vendor/dsh"   # 相对路径或绝对路径，如 F:/deepseek-harness
-
-# 构建桌面主进程和 preload 脚本。
-pnpm --filter @deepseek-ai/dsh-desktop run build
-
-# 启动 Electron。
-pnpm --filter @deepseek-ai/dsh-desktop run dev
-```
-
-## 打包
-
 ```sh
-# 当前平台。
-pnpm --filter @deepseek-ai/dsh-desktop run dist
+# 拉取deepseek harness并构建.
+pnpm run setup
 
-# 指定平台。
-pnpm --filter @deepseek-ai/dsh-desktop run dist:win
-pnpm --filter @deepseek-ai/dsh-desktop run dist:mac
-pnpm --filter @deepseek-ai/dsh-desktop run dist:linux
+# 构建桌面版客户端.
+pnpm run build
+
+# 打包.
+pnpm run dist:win
 ```
 
-打包后的安装文件位于 `apps/desktop/release/`。
+打包后的安装文件位于 `release/`。
 
 ## 架构
 

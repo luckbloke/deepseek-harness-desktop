@@ -7,32 +7,16 @@ single-instance locking.
 ## Development
 
 ```sh
-# Build the web frontend first (consumed as extraResources in the package).
-pnpm run build:web
+# Pull deepseek harness and build.
+pnpm run setup
 
-# Build the dsh CLI.
-pnpm run build:lib
+# Build the deepseek harness desktop.
+pnpm run build
 
-# Build the desktop main/preload scripts.
-pnpm --filter @deepseek-ai/dsh-desktop run build
-
-# Launch Electron against the built scripts.
-pnpm --filter @deepseek-ai/dsh-desktop run dev
+# Packaging.
+pnpm run dist:win
 ```
-
-## Packaging
-
-```sh
-# Current platform.
-pnpm --filter @deepseek-ai/dsh-desktop run dist
-
-# Specific platforms.
-pnpm --filter @deepseek-ai/dsh-desktop run dist:win
-pnpm --filter @deepseek-ai/dsh-desktop run dist:mac
-pnpm --filter @deepseek-ai/dsh-desktop run dist:linux
-```
-
-Packaged installers land in `apps/desktop/release/`.
+Packaged installers land in `release/`.
 
 ## Architecture
 
